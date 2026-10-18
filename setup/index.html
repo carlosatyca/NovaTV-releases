@@ -165,9 +165,17 @@
         const body = await encrypt({ f: form, v: values, ts: Date.now() });
         const r = await fetch(RELAY + topic, { method: "POST", body });
         if (!r.ok) throw new Error("envío " + r.status);
-        btn.textContent = "Comprobando en la tele…";
-        const reply = await waitReply(since);
-        if (!reply) { showResult(false, "La tele no responde", "Comprueba que la tele sigue mostrando el código QR y que tiene Internet."); return; }
+        btn.textContent = "Esperando a la tele…";
+        const reply = await waitReply(since, (text) => (btn.textContent = text));
+        if (!reply) {
+          showResult(false, "La tele no responde",
+            "Comprueba que la tele sigue mostrando el código QR, que tiene Internet y que debajo del QR pone «Lista para recibir los datos del móvil».");
+          return;
+        }
+        if (reply.stage === "received") {
+          showResult(true, "Recibido", "La tele ha recibido y guardado los datos, pero las comprobaciones están tardando. Mira el resultado en la tele.");
+          return;
+        }
         showResult(!!reply.ok, reply.ok ? "¡Listo!" : "No se ha podido guardar", reply.message || "", reply.ok ? reply.continueLabel : null);
       } catch (e) {
         showResult(false, "No se ha podido enviar", "Revisa la conexión del móvil e inténtalo de nuevo. (" + e.message + ")");
@@ -175,22 +183,32 @@
     };
   }
 
-  /** Espera la respuesta cifrada de la tele (hasta ~60 s). */
-  async function waitReply(since) {
-    const until = Date.now() + 60000;
-    while (Date.now() < until) {
+  /**
+   * Espera la respuesta cifrada de la tele. Primero llega un acuse ("received") y después el resultado final.
+   * Hasta 40 s sin acuse; con acuse, hasta 120 s para el resultado.
+   */
+  async function waitReply(since, onProgress) {
+    const start = Date.now();
+    let received = null;
+    while (Date.now() - start < (received ? 120000 : 40000)) {
       await new Promise((res) => setTimeout(res, 1500));
       try {
         const r = await fetch(`${RELAY}${topic}r/json?poll=1&since=${since}`);
         const lines = (await r.text()).split("\n").filter(Boolean);
-        for (const line of lines.reverse()) {
+        for (const line of lines) {
           const m = JSON.parse(line);
           if (m.event !== "message" || !m.message) continue;
-          try { return await decrypt(m.message); } catch (_) { /* no es para nosotros */ }
+          let reply;
+          try { reply = await decrypt(m.message); } catch (_) { continue; /* no es para nosotros */ }
+          if (reply.stage === "received") {
+            if (!received) { received = reply; onProgress("La tele lo ha recibido. Comprobando…"); }
+          } else {
+            return reply;
+          }
         }
       } catch (_) { /* reintentar */ }
     }
-    return null;
+    return received;
   }
 
   render();
