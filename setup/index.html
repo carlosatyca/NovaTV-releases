@@ -46,6 +46,10 @@
 (function () {
   const RELAY = "https://ntfy.sh/";
   const app = document.getElementById("app");
+  // Cada QR trae su propio canal y clave tras "#". Si el móvil reutiliza la pestaña (Safari solo cambia
+  // el "#" sin recargar) o la restaura de la caché, recargamos para no enviar al canal de un QR antiguo.
+  window.addEventListener("hashchange", () => location.reload());
+  window.addEventListener("pageshow", (e) => { if (e.persisted) location.reload(); });
   const q = new URLSearchParams(location.hash.slice(1));
   const topic = q.get("t") || "";
   const keyB64 = q.get("k") || "";
